@@ -1,29 +1,19 @@
-
-import json
 import os
-from datetime import datetime
+import json
 
-RAPOR_KLASORU = "ai_raporlari"
+HISTORY_FILE = "scan_history.json"
 
-def ai_raporlari_yukle():
-    if not os.path.exists(RAPOR_KLASORU):
+def save_report(item):
+    history = []
+    if os.path.exists(HISTORY_FILE):
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            history = json.load(f)
+    history.insert(0, item)
+    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+        json.dump(history, f, ensure_ascii=False, indent=2)
+
+def load_history():
+    if not os.path.exists(HISTORY_FILE):
         return []
-    raporlar = []
-    for dosya in sorted(os.listdir(RAPOR_KLASORU), reverse=True):
-        if dosya.endswith(".json"):
-            tam_yol = os.path.join(RAPOR_KLASORU, dosya)
-            with open(tam_yol, "r", encoding="utf-8") as f:
-                try:
-                    raporlar.append(json.load(f))
-                except:
-                    continue
-    return raporlar
-
-def ai_rapor_kaydet(veri: dict):
-    if not os.path.exists(RAPOR_KLASORU):
-        os.makedirs(RAPOR_KLASORU)
-    tarih = datetime.now().strftime("%Y%m%d_%H%M%S")
-    dosya_adi = f"rapor_{tarih}.json"
-    tam_yol = os.path.join(RAPOR_KLASORU, dosya_adi)
-    with open(tam_yol, "w", encoding="utf-8") as f:
-        json.dump(veri, f, ensure_ascii=False, indent=2)
+    with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)

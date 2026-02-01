@@ -1,8 +1,8 @@
+import numpy as np
 import plotly.graph_objects as go
 import matplotlib.pyplot as plt
-import numpy as np
+# ... (önceki z-score, bbox, box_blur vb. fonksiyonlar buraya)
 
-# 2D heatmap olarak Z skorunu matplotlib ile çiz
 def zscore_to_heatmap(Z_z):
     plt.figure(figsize=(6,4))
     plt.imshow(Z_z, origin="lower", cmap="RdBu")
@@ -11,7 +11,6 @@ def zscore_to_heatmap(Z_z):
     plt.tight_layout()
     return plt
 
-# 3D surface Plotly grafiği
 def zscore_to_surface(Z_z):
     H, W = Z_z.shape
     X, Y = np.meshgrid(np.arange(W), np.arange(H))
@@ -24,6 +23,5 @@ def zscore_to_surface(Z_z):
         zaxis_title="Z"))
     return fig
 
-# Basit harita fonksiyonu (Streamlit map kullanımı için)
 def plot_map(lat, lon):
     return [{"lat": lat, "lon": lon}]

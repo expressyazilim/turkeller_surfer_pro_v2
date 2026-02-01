@@ -1,70 +1,85 @@
 
 import streamlit as st
-import numpy as np
-import plotly.graph_objs as go
-from core.analysis import get_cdse_token, run_analysis
+from core.analysis import run_analysis, get_cdse_token
 from core.ai import yerel_ai_analizi
-from utils.geo import parse_coord_pair, weighted_peak_center
-from utils.storage import ai_rapor_kaydet
+from utils.geo import zscore_to_heatmap, zscore_to_surface, plot_map
+from utils.storage import save_report, load_history
+import datetime
+import json
 
-st.set_page_config(page_title="Turkeller Surfer Pro", layout="wide")
-st.markdown('<link rel="stylesheet" href="assets/style.css">', unsafe_allow_html=True)
+st.set_page_config(layout="wide", page_title="Turkeller Surfer Pro")
 
 st.title("📡 Turkeller Surfer Pro")
-st.markdown("Yer altı yapı ve boşluk tespiti için Sentinel-1 Z analiz aracı")
+st.markdown("Yer altı yapılarını Sentinel-1 ile analiz edin")
 
+# API bilgileri secrets.toml'den
+client_id = st.secrets["client_id"]
+client_secret = st.secrets["client_secret"]
+
+# Sidebar
 with st.sidebar:
-    st.header("🔐 API Giriş")
-    client_id = st.text_input("Client ID", type="password")
-    client_secret = st.text_input("Client Secret", type="password")
-    st.markdown("---")
-    kords = st.text_input("📍 Koordinat (enlem, boylam)", "37.8719, 32.4841")
-    çap = st.slider("📏 Çap (metre)", 100, 1000, 250, step=50)
-    analiz_buton = st.button("🚀 Analiz Yap")
+    st.header("📍 Konum Ayarları")
+    lat = st.number_input("Enlem (lat)", value=38.5, format="%.6f")
+    lon = st.number_input("Boylam (lon)", value=27.2, format="%.6f")
+    çap = st.slider("Tarama Çapı (metre)", 100, 1000, 300, step=50)
 
-if analiz_buton:
-    lat, lon = parse_coord_pair(kords)
-    if lat is None or lon is None:
-        st.error("Geçersiz koordinat formatı.")
-        st.stop()
+    if st.button("📡 Analiz Başlat"):
+        try:
+            token = get_cdse_token(client_id, client_secret)
+            Z, Z_blur, Z_z, bbox = run_analysis(lat, lon, çap, token)
+            st.session_state["Z_z"] = Z_z
+            st.session_state["bbox"] = bbox
+            st.session_state["latlon"] = (lat, lon)
+            st.success("✅ Anomali analizi tamamlandı.")
+        except Exception as e:
+            st.error(f"Hata oluştu: {str(e)}")
 
-    try:
-        token = get_cdse_token(client_id, client_secret)
-        Z, Z_blur, Z_z, bbox = run_analysis(lat, lon, çap, token)
-    except Exception as e:
-        st.error(f"Veri alınamadı: {e}")
-        st.stop()
+# Analiz sonrası görseller ve AI yorum
+if "Z_z" in st.session_state:
+    Z_z = st.session_state["Z_z"]
+    bbox = st.session_state["bbox"]
 
-    st.success("✅ Veri alındı ve işlendi")
-    st.subheader("📊 Z-Score Heatmap")
-    fig2d = go.Figure(data=go.Heatmap(
-        z=Z_z,
-        colorscale='RdBu',
-        colorbar=dict(title="Z"),
-        zmid=0
-    ))
-    st.plotly_chart(fig2d, use_container_width=True)
+    st.subheader("🗺️ 2D Z-Skor Haritası")
+    st.pyplot(zscore_to_heatmap(Z_z))
 
-    st.subheader("🌐 3D Yüzey")
-    fig3d = go.Figure(data=[go.Surface(z=Z_z)])
-    st.plotly_chart(fig3d, use_container_width=True)
+    st.subheader("🌐 3D Yüzey Görselleştirme")
+    st.plotly_chart(zscore_to_surface(Z_z), use_container_width=True)
 
-    st.subheader("🧠 AI Yorumlama")
+    st.subheader("🤖 AI Yorum")
     yorum = yerel_ai_analizi(Z_z)
     st.json(yorum)
 
-    st.subheader("📌 En Güçlü Anomali")
-    peak_r, peak_c = np.unravel_index(np.nanargmax(np.abs(Z_z)), Z_z.shape)
-    Y, X = np.mgrid[0:Z_z.shape[0], 0:Z_z.shape[1]]
-    lat_peak, lon_peak = weighted_peak_center(peak_r, peak_c, Z_z, X, Y)
-    st.write(f"📍 Peak koordinat: ({round(lat_peak,6)}, {round(lon_peak,6)})")
-
-    kaydet = st.button("💾 Raporu Kaydet")
-    if kaydet:
-        rapor = {
-            "giris": {"lat": lat, "lon": lon, "cap": çap},
-            "peak": {"lat": lat_peak, "lon": lon_peak},
-            "yorum": yorum
+    # Rapor kaydet
+    if st.button("💾 Raporu Kaydet"):
+        konum = {
+            "lat": st.session_state["latlon"][0],
+            "lon": st.session_state["latlon"][1],
+            "z_max": float(Z_z.max()),
+            "z_min": float(Z_z.min()),
+            "timestamp": datetime.datetime.now().isoformat()
         }
-        ai_rapor_kaydet(rapor)
+        save_report(konum)
         st.success("Rapor kaydedildi.")
+
+    # Anomaliye git
+    st.markdown("### 🎯 Anomali Odaklama")
+    z_max_loc = divmod(Z_z.argmax(), Z_z.shape[1])
+    z_min_loc = divmod(Z_z.argmin(), Z_z.shape[1])
+    if st.button("📍 Pozitif Anomaliye Git"):
+        st.map([{
+            "lat": bbox[1] + (bbox[3] - bbox[1]) * z_max_loc[0] / Z_z.shape[0],
+            "lon": bbox[0] + (bbox[2] - bbox[0]) * z_max_loc[1] / Z_z.shape[1]
+        }])
+    if st.button("📍 Negatif Anomaliye Git"):
+        st.map([{
+            "lat": bbox[1] + (bbox[3] - bbox[1]) * z_min_loc[0] / Z_z.shape[0],
+            "lon": bbox[0] + (bbox[2] - bbox[0]) * z_min_loc[1] / Z_z.shape[1]
+        }])
+
+# Geçmiş konumlar
+st.sidebar.markdown("### 📂 Geçmiş Taramalar")
+for item in load_history():
+    with st.sidebar.expander(f"{item['timestamp'].split('T')[0]} @ {item['lat']:.4f},{item['lon']:.4f}"):
+        st.write(f"Z-max: {item['z_max']:.2f}, Z-min: {item['z_min']:.2f}")
+        if st.button("📍 Haritada Göster", key=item['timestamp']):
+            st.map([{"lat": item["lat"], "lon": item["lon"]}])
